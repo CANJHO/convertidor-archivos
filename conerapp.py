@@ -55,6 +55,11 @@ def limpiar_dataframe(df):
 
 def csv_a_excel_grande(file):
 
+    # copiar archivo en memoria (SOLUCION STREAMLIT CLOUD)
+    contenido = file.read()
+
+    buffer = io.BytesIO(contenido)
+
     output = io.BytesIO()
 
     writer = pd.ExcelWriter(
@@ -62,31 +67,36 @@ def csv_a_excel_grande(file):
         engine="openpyxl"
     )
 
-    file.seek(0)
+    fila_inicio = 0
+    encabezado_escrito = False
+
+    progreso = st.progress(0)
 
     chunk_iter = pd.read_csv(
-        file,
+        buffer,
         sep=None,
         engine="python",
         encoding_errors="ignore",
         chunksize=50000
     )
 
-    fila_inicio = 0
-    encabezado_escrito = False
-
-    progreso = st.progress(0)
-
     total_chunks = 0
 
-    file.seek(0)
-    for _ in pd.read_csv(file, sep=None, engine="python", encoding_errors="ignore", chunksize=50000):
+    buffer.seek(0)
+
+    for _ in pd.read_csv(
+        buffer,
+        sep=None,
+        engine="python",
+        encoding_errors="ignore",
+        chunksize=50000
+    ):
         total_chunks += 1
 
-    file.seek(0)
+    buffer.seek(0)
 
     chunk_iter = pd.read_csv(
-        file,
+        buffer,
         sep=None,
         engine="python",
         encoding_errors="ignore",
@@ -115,6 +125,7 @@ def csv_a_excel_grande(file):
     output.seek(0)
 
     return output
+
 
 
 # =====================================================
