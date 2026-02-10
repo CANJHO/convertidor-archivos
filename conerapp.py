@@ -198,9 +198,12 @@ def convertir_individual(archivo):
         )
 
 
-# ejecutar individual
+# ejecutar individual con botón
 if archivo:
-    convertir_individual(archivo)
+
+    if st.button("Convertir archivo"):
+
+        convertir_individual(archivo)
 
 
 # =====================================================
