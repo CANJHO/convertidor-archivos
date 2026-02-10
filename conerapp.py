@@ -12,94 +12,169 @@ st.set_page_config(page_title="Convertidor Inteligente", layout="wide")
 st.title("Convertidor de Archivos Inteligente")
 st.write("Convierte PDF, Excel, Word y CSV automáticamente")
 
-
 # =====================================================
+
 # FUNCION LIMPIAR ENCABEZADOS REPETIDOS
+
 # =====================================================
 
 def limpiar_dataframe(df):
 
-    if df is None or df.empty:
-        return df
 
-    palabras_encabezado = [
-        "ORDEN","CÓDIGO","CODIGO","CURSO","REQ",
-        "H TEO","H PRA","CRÉD","CRED","TIP CUR",
-        "TIP_CUR","ÁREA","AREA"
-    ]
+if df is None or df.empty:
+    return df
 
-    filas_limpias = []
+palabras_encabezado = [
+    "ORDEN","CÓDIGO","CODIGO","CURSO","REQ",
+    "H TEO","H PRA","CRÉD","CRED","TIP CUR",
+    "TIP_CUR","ÁREA","AREA"
+]
 
-    for _, fila in df.iterrows():
+filas_limpias = []
 
-        valores = [str(v).upper().strip() for v in fila.values]
+for _, fila in df.iterrows():
 
-        coincidencias = sum(
-            1 for v in valores if v in palabras_encabezado
-        )
+    valores = [str(v).upper().strip() for v in fila.values]
 
-        if coincidencias < 3:
-            filas_limpias.append(fila)
+    coincidencias = sum(
+        1 for v in valores if v in palabras_encabezado
+    )
 
-    df_limpio = pd.DataFrame(filas_limpias)
+    if coincidencias < 3:
+        filas_limpias.append(fila)
 
-    df_limpio.columns = df.columns
-    df_limpio.reset_index(drop=True, inplace=True)
+df_limpio = pd.DataFrame(filas_limpias)
 
-    return df_limpio
+df_limpio.columns = df.columns
+df_limpio.reset_index(drop=True, inplace=True)
+
+return df_limpio
 
 
 # =====================================================
-# LECTOR CSV INTELIGENTE
+
+# LECTOR CSV INTELIGENTE NORMAL
+
 # =====================================================
 
 def leer_csv_seguro(file):
 
+
     codificaciones = ["utf-8", "latin1", "cp1252"]
 
-    for enc in codificaciones:
+for enc in codificaciones:
 
-        try:
-
-            file.seek(0)
-
-            df = pd.read_csv(
-                file,
-                encoding=enc,
-                sep=None,
-                engine="python"
-            )
-
-            if df.shape[1] >= 1:
-                return df
-
-        except:
-            continue
-
-
-    # intentar leer como Excel disfrazado
     try:
 
         file.seek(0)
 
-        df = pd.read_excel(file)
+        df = pd.read_csv(
+            file,
+            encoding=enc,
+            sep=None,
+            engine="python"
+        )
 
-        return df
+        if df.shape[1] >= 1:
+            return df
 
     except:
-        pass
+        continue
 
 
-    raise Exception(
-        "No se pudo leer el archivo CSV"
+try:
+
+    file.seek(0)
+    df = pd.read_excel(file)
+    return df
+
+except:
+    pass
+
+
+raise Exception("No se pudo leer el archivo CSV")
+
+
+    # =====================================================
+
+    # CSV → EXCEL PARA ARCHIVOS MUY GRANDES (1GB+)
+
+    # =====================================================
+
+def csv_a_excel_grande(file):
+
+
+    output = io.BytesIO()
+
+    writer = pd.ExcelWriter(
+        output,
+        engine="openpyxl"
     )
+
+file.seek(0)
+
+chunk_iter = pd.read_csv(
+    file,
+    sep=None,
+    engine="python",
+    encoding_errors="ignore",
+    chunksize=50000
+)
+
+fila_inicio = 0
+
+encabezado_escrito = False
+
+progreso = st.progress(0)
+total_chunks = 0
+
+# contar chunks aproximados
+file.seek(0)
+for _ in pd.read_csv(file, sep=None, engine="python", encoding_errors="ignore", chunksize=50000):
+    total_chunks += 1
+
+file.seek(0)
+
+chunk_iter = pd.read_csv(
+    file,
+    sep=None,
+    engine="python",
+    encoding_errors="ignore",
+    chunksize=50000
+)
+
+for i, chunk in enumerate(chunk_iter):
+
+    chunk = limpiar_dataframe(chunk)
+
+    chunk.to_excel(
+        writer,
+        index=False,
+        startrow=fila_inicio,
+        header=not encabezado_escrito
+    )
+
+    encabezado_escrito = True
+
+    fila_inicio += len(chunk)
+
+    progreso.progress((i+1)/total_chunks)
+
+writer.close()
+
+output.seek(0)
+
+return output
 
 
 # =====================================================
+
 # METODO 1 TABLAS REALES PDF
+
 # =====================================================
 
 def extraer_tablas_pdf(file):
+
 
     filas = []
 
@@ -121,7 +196,6 @@ def extraer_tablas_pdf(file):
         df = pd.DataFrame(filas)
 
         df.columns = df.iloc[0]
-
         df = df[1:]
 
         df = limpiar_dataframe(df)
@@ -132,11 +206,14 @@ def extraer_tablas_pdf(file):
 
 
 # =====================================================
+
 # METODO 2 TEXTO PDF
+
 # =====================================================
 
 def extraer_texto_pdf(file):
 
+    
     filas = []
 
     texto = ""
@@ -186,10 +263,13 @@ def extraer_texto_pdf(file):
 
 
 # =====================================================
+
 # FUNCION INTELIGENTE PDF
+
 # =====================================================
 
 def procesar_pdf(file, nombre_archivo=""):
+
 
     df = extraer_tablas_pdf(file)
 
@@ -203,178 +283,178 @@ def procesar_pdf(file, nombre_archivo=""):
 
     return df
 
+    # =====================================================
 
-# =====================================================
-# CONVERSION INDIVIDUAL
-# =====================================================
+    # CONVERSION INDIVIDUAL
+
+    # =====================================================
 
 st.header("Conversión Individual")
 
 archivo = st.file_uploader(
-    "Sube archivo",
-    type=["pdf","xlsx","csv","docx"]
+"Sube archivo",
+type=["pdf","xlsx","csv","docx"]
 )
 
 conversion = st.selectbox(
-    "Convertir a",
-    ["Excel (.xlsx)", "CSV (.csv)", "PDF (.pdf)"]
+"Convertir a",
+["Excel (.xlsx)", "CSV (.csv)", "PDF (.pdf)"]
 )
-
 
 def convertir_individual(archivo):
 
-    extension = archivo.name.split(".")[-1].lower()
+```
+extension = archivo.name.split(".")[-1].lower()
 
-    output = io.BytesIO()
+output = io.BytesIO()
 
 
-    # PDF → EXCEL
-    if extension == "pdf" and conversion == "Excel (.xlsx)":
+# PDF → EXCEL
+if extension == "pdf" and conversion == "Excel (.xlsx)":
 
-        df = procesar_pdf(archivo, archivo.name)
+    df = procesar_pdf(archivo, archivo.name)
 
-        if df is None:
-            st.error("No se pudo procesar el PDF")
-            return
+    if df is None:
+        st.error("No se pudo procesar el PDF")
+        return
 
-        df.to_excel(output, index=False)
+    df.to_excel(output, index=False)
+
+    nombre = "convertido.xlsx"
+
+
+# CSV → EXCEL (OPTIMIZADO PARA ARCHIVOS GIGANTES)
+elif extension == "csv" and conversion == "Excel (.xlsx)":
+
+    try:
+
+        output = csv_a_excel_grande(archivo)
 
         nombre = "convertido.xlsx"
 
+    except Exception as e:
 
-    # CSV → EXCEL
-    elif extension == "csv" and conversion == "Excel (.xlsx)":
-
-        try:
-
-            df = leer_csv_seguro(archivo)
-
-            df = limpiar_dataframe(df)
-
-            df.to_excel(output, index=False)
-
-            nombre = "convertido.xlsx"
-
-        except Exception as e:
-
-            st.error(str(e))
-            return
-
-
-    # EXCEL → CSV
-    elif extension == "xlsx" and conversion == "CSV (.csv)":
-
-        df = pd.read_excel(archivo)
-
-        df.to_csv(output, index=False)
-
-        nombre = "convertido.csv"
-
-
-    # WORD → PDF
-    elif extension == "docx" and conversion == "PDF (.pdf)":
-
-        doc = Document(archivo)
-
-        c = canvas.Canvas(output, pagesize=letter)
-
-        y = 750
-
-        for para in doc.paragraphs:
-
-            c.drawString(30, y, para.text)
-
-            y -= 20
-
-            if y < 50:
-                c.showPage()
-                y = 750
-
-        c.save()
-
-        nombre = "convertido.pdf"
-
-
-    else:
-
-        st.warning("Conversión no soportada")
+        st.error(f"Error procesando archivo grande: {str(e)}")
         return
 
 
-    output.seek(0)
+# EXCEL → CSV
+elif extension == "xlsx" and conversion == "CSV (.csv)":
 
-    st.success("Archivo convertido correctamente")
+    df = pd.read_excel(archivo)
 
-    st.download_button(
-        "Descargar archivo",
-        output,
-        nombre
-    )
+    df.to_csv(output, index=False)
+
+    nombre = "convertido.csv"
 
 
-# BOTON INDIVIDUAL
+# WORD → PDF
+elif extension == "docx" and conversion == "PDF (.pdf)":
+
+    doc = Document(archivo)
+
+    c = canvas.Canvas(output, pagesize=letter)
+
+    y = 750
+
+    for para in doc.paragraphs:
+
+        c.drawString(30, y, para.text)
+
+        y -= 20
+
+        if y < 50:
+            c.showPage()
+            y = 750
+
+    c.save()
+
+    nombre = "convertido.pdf"
+
+
+else:
+
+    st.warning("Conversión no soportada")
+    return
+
+
+output.seek(0)
+
+st.success("Archivo convertido correctamente")
+
+st.download_button(
+    "Descargar archivo",
+    output,
+    nombre
+)
+```
 
 if archivo:
 
-    if st.button("Convertir archivo"):
+```
+if st.button("Convertir archivo"):
 
-        convertir_individual(archivo)
-
-
+    convertir_individual(archivo)
+```
 
 # =====================================================
+
 # CONVERSION MASIVA
+
 # =====================================================
 
 st.header("Conversión Masiva (Streamlit Cloud Compatible)")
 
 archivos_masivos = st.file_uploader(
-    "Sube múltiples PDFs",
-    type=["pdf"],
-    accept_multiple_files=True
+"Sube múltiples PDFs",
+type=["pdf"],
+accept_multiple_files=True
 )
 
 if st.button("Convertir TODOS"):
 
-    if archivos_masivos:
+```
+if archivos_masivos:
 
-        progreso = st.progress(0)
+    progreso = st.progress(0)
 
-        total = len(archivos_masivos)
+    total = len(archivos_masivos)
 
-        dfs = []
+    dfs = []
 
-        for i, archivo_pdf in enumerate(archivos_masivos):
+    for i, archivo_pdf in enumerate(archivos_masivos):
 
-            df = procesar_pdf(
-                archivo_pdf,
-                archivo_pdf.name
-            )
+        df = procesar_pdf(
+            archivo_pdf,
+            archivo_pdf.name
+        )
 
-            if df is not None:
-                dfs.append(df)
+        if df is not None:
+            dfs.append(df)
 
-            progreso.progress((i+1)/total)
+        progreso.progress((i+1)/total)
 
 
-        if dfs:
+    if dfs:
 
-            final = pd.concat(dfs, ignore_index=True)
+        final = pd.concat(dfs, ignore_index=True)
 
-            output = io.BytesIO()
+        output = io.BytesIO()
 
-            final.to_excel(output, index=False)
+        final.to_excel(output, index=False)
 
-            output.seek(0)
+        output.seek(0)
 
-            st.success("Conversión completada")
+        st.success("Conversión completada")
 
-            st.download_button(
-                "Descargar Excel Consolidado",
-                output,
-                "TODOS_LOS_PLANES.xlsx"
-            )
+        st.download_button(
+            "Descargar Excel Consolidado",
+            output,
+            "TODOS_LOS_PLANES.xlsx"
+        )
 
-        else:
+    else:
 
-            st.error("No se pudo convertir")
+        st.error("No se pudo convertir") 
+        
+```
