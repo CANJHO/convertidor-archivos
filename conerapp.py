@@ -179,23 +179,82 @@ def convertir_individual(archivo):
 
     extension = archivo.name.split(".")[-1].lower()
 
-    if extension == "pdf":
+    output = io.BytesIO()
+
+    # PDF → EXCEL
+    if extension == "pdf" and conversion == "Excel (.xlsx)":
 
         df = procesar_pdf(archivo, archivo.name)
 
         if df is None:
-            st.error("No se pudo procesar")
+            st.error("No se pudo procesar el PDF")
             return
 
-        output = io.BytesIO()
         df.to_excel(output, index=False)
-        output.seek(0)
 
-        st.download_button(
-            "Descargar Excel",
-            output,
-            "convertido.xlsx"
-        )
+        nombre = "convertido.xlsx"
+
+
+    # EXCEL → CSV
+    elif extension == "xlsx" and conversion == "CSV (.csv)":
+
+        df = pd.read_excel(archivo)
+
+        df.to_csv(output, index=False)
+
+        nombre = "convertido.csv"
+
+
+    # CSV → EXCEL
+    elif extension == "csv" and conversion == "Excel (.xlsx)":
+
+        df = pd.read_csv(archivo)
+
+        df.to_excel(output, index=False)
+
+        nombre = "convertido.xlsx"
+
+
+    # WORD → PDF
+    elif extension == "docx" and conversion == "PDF (.pdf)":
+
+        doc = Document(archivo)
+
+        c = canvas.Canvas(output, pagesize=letter)
+
+        y = 750
+
+        for para in doc.paragraphs:
+
+            c.drawString(30, y, para.text)
+
+            y -= 20
+
+            if y < 50:
+                c.showPage()
+                y = 750
+
+        c.save()
+
+        nombre = "convertido.pdf"
+
+
+    else:
+
+        st.warning("Conversión no soportada para este archivo")
+
+        return
+
+
+    output.seek(0)
+
+    st.success("Archivo convertido correctamente")
+
+    st.download_button(
+        "Descargar archivo",
+        output,
+        nombre
+    )
 
 
 # ejecutar individual con botón
