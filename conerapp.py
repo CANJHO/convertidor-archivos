@@ -12,6 +12,7 @@ st.set_page_config(page_title="Convertidor Inteligente", layout="wide")
 st.title("Convertidor de Archivos Inteligente")
 st.write("Convierte PDF, Excel, Word y CSV automáticamente")
 
+
 # =====================================================
 # FUNCION LIMPIAR ENCABEZADOS REPETIDOS
 # =====================================================
@@ -49,7 +50,53 @@ def limpiar_dataframe(df):
 
 
 # =====================================================
-# METODO 1 TABLAS REALES
+# LECTOR CSV INTELIGENTE
+# =====================================================
+
+def leer_csv_seguro(file):
+
+    codificaciones = ["utf-8", "latin1", "cp1252"]
+
+    for enc in codificaciones:
+
+        try:
+
+            file.seek(0)
+
+            df = pd.read_csv(
+                file,
+                encoding=enc,
+                sep=None,
+                engine="python"
+            )
+
+            if df.shape[1] >= 1:
+                return df
+
+        except:
+            continue
+
+
+    # intentar leer como Excel disfrazado
+    try:
+
+        file.seek(0)
+
+        df = pd.read_excel(file)
+
+        return df
+
+    except:
+        pass
+
+
+    raise Exception(
+        "No se pudo leer el archivo CSV"
+    )
+
+
+# =====================================================
+# METODO 1 TABLAS REALES PDF
 # =====================================================
 
 def extraer_tablas_pdf(file):
@@ -85,7 +132,7 @@ def extraer_tablas_pdf(file):
 
 
 # =====================================================
-# METODO 2 TEXTO
+# METODO 2 TEXTO PDF
 # =====================================================
 
 def extraer_texto_pdf(file):
@@ -139,7 +186,7 @@ def extraer_texto_pdf(file):
 
 
 # =====================================================
-# FUNCION INTELIGENTE
+# FUNCION INTELIGENTE PDF
 # =====================================================
 
 def procesar_pdf(file, nombre_archivo=""):
@@ -147,7 +194,6 @@ def procesar_pdf(file, nombre_archivo=""):
     df = extraer_tablas_pdf(file)
 
     if df is None or df.empty:
-
         df = extraer_texto_pdf(file)
 
     if df is None:
@@ -181,6 +227,7 @@ def convertir_individual(archivo):
 
     output = io.BytesIO()
 
+
     # PDF → EXCEL
     if extension == "pdf" and conversion == "Excel (.xlsx)":
 
@@ -195,6 +242,25 @@ def convertir_individual(archivo):
         nombre = "convertido.xlsx"
 
 
+    # CSV → EXCEL
+    elif extension == "csv" and conversion == "Excel (.xlsx)":
+
+        try:
+
+            df = leer_csv_seguro(archivo)
+
+            df = limpiar_dataframe(df)
+
+            df.to_excel(output, index=False)
+
+            nombre = "convertido.xlsx"
+
+        except Exception as e:
+
+            st.error(str(e))
+            return
+
+
     # EXCEL → CSV
     elif extension == "xlsx" and conversion == "CSV (.csv)":
 
@@ -203,16 +269,6 @@ def convertir_individual(archivo):
         df.to_csv(output, index=False)
 
         nombre = "convertido.csv"
-
-
-    # CSV → EXCEL
-    elif extension == "csv" and conversion == "Excel (.xlsx)":
-
-        df = pd.read_csv(archivo)
-
-        df.to_excel(output, index=False)
-
-        nombre = "convertido.xlsx"
 
 
     # WORD → PDF
@@ -241,8 +297,7 @@ def convertir_individual(archivo):
 
     else:
 
-        st.warning("Conversión no soportada para este archivo")
-
+        st.warning("Conversión no soportada")
         return
 
 
@@ -257,7 +312,8 @@ def convertir_individual(archivo):
     )
 
 
-# ejecutar individual con botón
+# BOTON INDIVIDUAL
+
 if archivo:
 
     if st.button("Convertir archivo"):
@@ -265,8 +321,9 @@ if archivo:
         convertir_individual(archivo)
 
 
+
 # =====================================================
-# CONVERSION MASIVA STREAMLIT CLOUD
+# CONVERSION MASIVA
 # =====================================================
 
 st.header("Conversión Masiva (Streamlit Cloud Compatible)")
@@ -287,17 +344,18 @@ if st.button("Convertir TODOS"):
 
         dfs = []
 
-        for i, archivo in enumerate(archivos_masivos):
+        for i, archivo_pdf in enumerate(archivos_masivos):
 
             df = procesar_pdf(
-                archivo,
-                archivo.name
+                archivo_pdf,
+                archivo_pdf.name
             )
 
             if df is not None:
                 dfs.append(df)
 
             progreso.progress((i+1)/total)
+
 
         if dfs:
 
@@ -318,4 +376,5 @@ if st.button("Convertir TODOS"):
             )
 
         else:
+
             st.error("No se pudo convertir")
