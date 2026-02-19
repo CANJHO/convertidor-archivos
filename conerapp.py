@@ -234,8 +234,6 @@ def extraer_tablas_pdf(file):
 
 def extraer_texto_pdf(file):
 
-    import re
-
     texto_completo = ""
 
     with pdfplumber.open(file) as pdf:
@@ -248,17 +246,6 @@ def extraer_texto_pdf(file):
 
     filas = []
 
-    patron = re.compile(
-        r'^(\d+)?\s*'                # ORDEN opcional
-        r'([A-Z0-9\-]+)\s+'          # CODIGO
-        r'([A-ZÁÉÍÓÚÑ().,\s]+?)\s+'  # CURSO
-        r'(\d+)\s+'                  # HT
-        r'(\d+)\s+'                  # HP
-        r'(\d+)\s+'                  # TH
-        r'(\d+)\s+'                  # CRED
-        r'(.*)$'                     # REQ
-    )
-
     for linea in lineas:
 
         linea = linea.strip()
@@ -266,26 +253,41 @@ def extraer_texto_pdf(file):
         if not linea:
             continue
 
+        # Saltar encabezados
         if any(p in linea.upper() for p in [
             "ORDEN", "CÓDIGO", "CODIGO", "CURSO",
-            "SEMESTRE", "TOTAL"
+            "SEMESTRE", "TOTAL", "CREDITOS"
         ]):
             continue
 
-        match = patron.match(linea)
+        # Separar por múltiples espacios
+        partes = re.split(r'\s{2,}', linea)
 
-        if match:
-            orden, codigo, curso, ht, hp, th, cred, req = match.groups()
+        # Debe tener al menos 7 columnas
+        if len(partes) >= 7:
 
-            filas.append([
-                codigo.strip(),
-                curso.strip(),
-                ht,
-                hp,
-                th,
-                cred,
-                req.strip()
-            ])
+            # Algunas líneas traen ORDEN al inicio
+            if partes[0].isdigit():
+                partes = partes[1:]
+
+            if len(partes) >= 7:
+                codigo = partes[0]
+                curso = partes[1]
+                ht = partes[2]
+                hp = partes[3]
+                th = partes[4]
+                cred = partes[5]
+                req = partes[6]
+
+                filas.append([
+                    codigo,
+                    curso,
+                    ht,
+                    hp,
+                    th,
+                    cred,
+                    req
+                ])
 
     if not filas:
         return None
