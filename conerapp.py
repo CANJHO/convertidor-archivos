@@ -234,27 +234,29 @@ def extraer_tablas_pdf(file):
 
 def extraer_texto_pdf(file):
 
-    filas = []
-    texto = ""
+    import re
+
+    texto_completo = ""
 
     with pdfplumber.open(file) as pdf:
         for pagina in pdf.pages:
-            contenido = pagina.extract_text()
-            if contenido:
-                texto += contenido + "\n"
+            texto = pagina.extract_text()
+            if texto:
+                texto_completo += texto + "\n"
 
-    lineas = texto.split("\n")
+    lineas = texto_completo.split("\n")
 
-    # 🔥 REGEX MÁS FLEXIBLE (2017 + 2024 + 2025)
+    filas = []
+
     patron = re.compile(
-        r'^(?:\d+\s+)?'                # ORDEN opcional
-        r'([A-Z0-9]+)\s+'              # CODIGO
-        r'(.+?)\s+'                    # CURSO
-        r'(\d+)\s+'                    # HT
-        r'(\d+)\s+'                    # HP
-        r'(\d+)\s+'                    # TH
-        r'(\d+)\s+'                    # CRED
-        r'(.+)$'                       # REQ o AREA
+        r'^(\d+)?\s*'                # ORDEN opcional
+        r'([A-Z0-9\-]+)\s+'          # CODIGO
+        r'([A-ZÁÉÍÓÚÑ().,\s]+?)\s+'  # CURSO
+        r'(\d+)\s+'                  # HT
+        r'(\d+)\s+'                  # HP
+        r'(\d+)\s+'                  # TH
+        r'(\d+)\s+'                  # CRED
+        r'(.*)$'                     # REQ
     )
 
     for linea in lineas:
@@ -264,28 +266,42 @@ def extraer_texto_pdf(file):
         if not linea:
             continue
 
-        if "SEMESTRE" in linea.upper():
+        if any(p in linea.upper() for p in [
+            "ORDEN", "CÓDIGO", "CODIGO", "CURSO",
+            "SEMESTRE", "TOTAL"
+        ]):
             continue
 
         match = patron.match(linea)
 
         if match:
-            filas.append(match.groups())
+            orden, codigo, curso, ht, hp, th, cred, req = match.groups()
 
-    if filas:
+            filas.append([
+                codigo.strip(),
+                curso.strip(),
+                ht,
+                hp,
+                th,
+                cred,
+                req.strip()
+            ])
 
-        columnas = [
-            "CODIGO","CURSO",
-            "HT","HP","TH","CRED","REQ"
-        ]
+    if not filas:
+        return None
 
-        df = pd.DataFrame(filas, columns=columnas)
+    columnas = [
+        "CODIGO", "CURSO",
+        "HT", "HP", "TH",
+        "CRED", "REQ"
+    ]
 
-        df = limpiar_dataframe(df)
+    df = pd.DataFrame(filas, columns=columnas)
 
-        return df
+    df.reset_index(drop=True, inplace=True)
 
-    return None
+    return df
+
 
 
 # =====================================================
@@ -294,17 +310,15 @@ def extraer_texto_pdf(file):
 
 def procesar_pdf(file, nombre_archivo=""):
 
-    df = extraer_tablas_pdf(file)
+    df = extraer_texto_pdf(file)
 
     if df is None or df.empty:
-        df = extraer_texto_pdf(file)
-
-    if df is None:
         return None
 
     df.insert(0, "ARCHIVO", nombre_archivo)
 
     return df
+
 
 
 # =====================================================
