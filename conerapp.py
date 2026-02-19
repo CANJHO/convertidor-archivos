@@ -13,10 +13,6 @@ st.title("Convertidor de Archivos Inteligente")
 st.write("Convierte PDF, Excel, Word y CSV automáticamente")
 
 
-# =====================================================
-# LIMPIAR ENCABEZADOS REPETIDOS
-# =====================================================
-
 def limpiar_dataframe(df):
 
     if df is None or df.empty:
@@ -25,40 +21,57 @@ def limpiar_dataframe(df):
     palabras_encabezado = [
         "ORDEN","CÓDIGO","CODIGO","CURSO","REQ",
         "H TEO","H PRA","CRÉD","CRED","TIP CUR",
-        "TIP_CUR","ÁREA","AREA","ESP","HT","HP",
-        "TH","CRD","REQU"
+        "TIP_CUR","ÁREA","AREA"
     ]
 
     filas_limpias = []
 
     for _, fila in df.iterrows():
+
         valores = [str(v).upper().strip() for v in fila.values]
-        coincidencias = sum(1 for v in valores if v in palabras_encabezado)
+
+        coincidencias = sum(
+            1 for v in valores if v in palabras_encabezado
+        )
 
         if coincidencias < 3:
-            filas_limpias.append(fila)
+            filas_limpias.append(fila.tolist())  # ← importante
 
-    df_limpio = pd.DataFrame(filas_limpias)
-    df_limpio.columns = df.columns
+    # 🔥 SI SE ELIMINÓ TODO, DEVOLVER DF ORIGINAL
+    if not filas_limpias:
+        return df
+
+    # 🔥 CREAR CON MISMAS COLUMNAS
+    df_limpio = pd.DataFrame(filas_limpias, columns=df.columns)
+
     df_limpio.reset_index(drop=True, inplace=True)
 
     return df_limpio
 
 
+
 # =====================================================
-# CSV GRANDE → EXCEL
+# CSV GRANDE → EXCEL (HASTA 1GB+)
 # =====================================================
 
 def csv_a_excel_grande(file):
 
+    # copiar archivo en memoria (SOLUCION STREAMLIT CLOUD)
     contenido = file.read()
+
     buffer = io.BytesIO(contenido)
+
     output = io.BytesIO()
 
-    writer = pd.ExcelWriter(output, engine="openpyxl")
+    writer = pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    )
 
     fila_inicio = 0
     encabezado_escrito = False
+
+    progreso = st.progress(0)
 
     chunk_iter = pd.read_csv(
         buffer,
@@ -68,7 +81,30 @@ def csv_a_excel_grande(file):
         chunksize=50000
     )
 
-    for chunk in chunk_iter:
+    total_chunks = 0
+
+    buffer.seek(0)
+
+    for _ in pd.read_csv(
+        buffer,
+        sep=None,
+        engine="python",
+        encoding_errors="ignore",
+        chunksize=50000
+    ):
+        total_chunks += 1
+
+    buffer.seek(0)
+
+    chunk_iter = pd.read_csv(
+        buffer,
+        sep=None,
+        engine="python",
+        encoding_errors="ignore",
+        chunksize=50000
+    )
+
+    for i, chunk in enumerate(chunk_iter):
 
         chunk = limpiar_dataframe(chunk)
 
@@ -80,12 +116,17 @@ def csv_a_excel_grande(file):
         )
 
         encabezado_escrito = True
+
         fila_inicio += len(chunk)
 
+        progreso.progress((i+1)/total_chunks)
+
     writer.close()
+
     output.seek(0)
 
     return output
+
 
 
 # =====================================================
@@ -97,19 +138,26 @@ def extraer_tablas_pdf(file):
     filas = []
 
     with pdfplumber.open(file) as pdf:
+
         for pagina in pdf.pages:
+
             tablas = pagina.extract_tables()
 
             for tabla in tablas:
+
                 for fila in tabla:
+
                     if fila and any(celda is not None for celda in fila):
                         filas.append(fila)
 
     if filas:
 
         df = pd.DataFrame(filas)
+
         df.columns = df.iloc[0]
+
         df = df[1:]
+
         df = limpiar_dataframe(df)
 
         return df
@@ -118,45 +166,39 @@ def extraer_tablas_pdf(file):
 
 
 # =====================================================
-# EXTRAER TEXTO PDF (ACTUALIZADO)
+# EXTRAER TEXTO PDF
 # =====================================================
 
 def extraer_texto_pdf(file):
 
     filas = []
+
     texto = ""
 
     with pdfplumber.open(file) as pdf:
+
         for pagina in pdf.pages:
+
             contenido = pagina.extract_text()
+
             if contenido:
                 texto += contenido + "\n"
 
     lineas = texto.split("\n")
 
     patron = re.compile(
-        r'^(?:P\d+-\d+-)?\s*'
-        r'(\w+)\s+'
+        r'^(\d+)\s+'
+        r'(P\d+A\d+)\s+'
         r'(.+?)\s+'
-        r'(\d+\.?\d*)\s+'
-        r'(\d+\.?\d*)\s+'
-        r'(\d+\.?\d*)\s+'
-        r'(\d+\.?\d*)\s+'
-        r'(\d+\.?\d*)\s+'
-        r'(.+)$'
+        r'(P\d+A\d+)?\s*'
+        r'(\d+)\s+(\d+)\s+(\d+)\s+'
+        r'([OE])\s+'
+        r'(EC|EF|GE)'
     )
 
     for linea in lineas:
 
-        linea = linea.strip()
-
-        if not linea:
-            continue
-
-        if "SEMESTRE" in linea or "PLAN" in linea:
-            continue
-
-        match = patron.match(linea)
+        match = patron.match(linea.strip())
 
         if match:
             filas.append(match.groups())
@@ -164,12 +206,12 @@ def extraer_texto_pdf(file):
     if filas:
 
         columnas = [
-            "CODIGO","CURSO",
-            "ESP","HT","HP","TH",
-            "CRED","REQ"
+            "ORDEN","CODIGO","CURSO","REQ",
+            "H_TEO","H_PRA","CRED","TIP_CUR","AREA"
         ]
 
         df = pd.DataFrame(filas, columns=columnas)
+
         df = limpiar_dataframe(df)
 
         return df
@@ -216,6 +258,7 @@ conversion = st.selectbox(
 def convertir_individual(archivo):
 
     extension = archivo.name.split(".")[-1].lower()
+
     output = io.BytesIO()
 
     if extension == "pdf" and conversion == "Excel (.xlsx)":
@@ -227,31 +270,45 @@ def convertir_individual(archivo):
             return
 
         df.to_excel(output, index=False)
+
         nombre = "convertido.xlsx"
+
 
     elif extension == "csv" and conversion == "Excel (.xlsx)":
 
         try:
+
             output = csv_a_excel_grande(archivo)
+
             nombre = "convertido.xlsx"
+
         except Exception as e:
+
             st.error(str(e))
             return
+
 
     elif extension == "xlsx" and conversion == "CSV (.csv)":
 
         df = pd.read_excel(archivo)
+
         df.to_csv(output, index=False)
+
         nombre = "convertido.csv"
+
 
     elif extension == "docx" and conversion == "PDF (.pdf)":
 
         doc = Document(archivo)
+
         c = canvas.Canvas(output, pagesize=letter)
+
         y = 750
 
         for para in doc.paragraphs:
+
             c.drawString(30, y, para.text)
+
             y -= 20
 
             if y < 50:
@@ -259,11 +316,15 @@ def convertir_individual(archivo):
                 y = 750
 
         c.save()
+
         nombre = "convertido.pdf"
 
+
     else:
+
         st.warning("Conversión no soportada")
         return
+
 
     output.seek(0)
 
@@ -277,12 +338,14 @@ def convertir_individual(archivo):
 
 
 if archivo:
+
     if st.button("Convertir archivo"):
+
         convertir_individual(archivo)
 
 
 # =====================================================
-# CONVERSION MASIVA
+# CONVERSION MASIVA PDF
 # =====================================================
 
 st.header("Conversión Masiva")
@@ -298,7 +361,9 @@ if st.button("Convertir TODOS"):
     if archivos_masivos:
 
         progreso = st.progress(0)
+
         total = len(archivos_masivos)
+
         dfs = []
 
         for i, archivo_pdf in enumerate(archivos_masivos):
@@ -318,7 +383,9 @@ if st.button("Convertir TODOS"):
             final = pd.concat(dfs, ignore_index=True)
 
             output = io.BytesIO()
+
             final.to_excel(output, index=False)
+
             output.seek(0)
 
             st.success("Conversión completada")
@@ -330,4 +397,5 @@ if st.button("Convertir TODOS"):
             )
 
         else:
+
             st.error("No se pudo convertir")
