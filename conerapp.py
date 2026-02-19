@@ -190,33 +190,39 @@ def extraer_tablas_pdf(file):
 def extraer_texto_pdf(file):
 
     filas = []
-
     texto = ""
 
     with pdfplumber.open(file) as pdf:
-
         for pagina in pdf.pages:
-
             contenido = pagina.extract_text()
-
             if contenido:
                 texto += contenido + "\n"
 
     lineas = texto.split("\n")
 
+    # 🔥 REGEX MÁS FLEXIBLE (2017 + 2024 + 2025)
     patron = re.compile(
-        r'^(\d+)\s+'
-        r'(P\d+A\d+)\s+'
-        r'(.+?)\s+'
-        r'(P\d+A\d+)?\s*'
-        r'(\d+)\s+(\d+)\s+(\d+)\s+'
-        r'([OE])\s+'
-        r'(EC|EF|GE)'
+        r'^(?:\d+\s+)?'                # ORDEN opcional
+        r'([A-Z0-9]+)\s+'              # CODIGO
+        r'(.+?)\s+'                    # CURSO
+        r'(\d+)\s+'                    # HT
+        r'(\d+)\s+'                    # HP
+        r'(\d+)\s+'                    # TH
+        r'(\d+)\s+'                    # CRED
+        r'(.+)$'                       # REQ o AREA
     )
 
     for linea in lineas:
 
-        match = patron.match(linea.strip())
+        linea = linea.strip()
+
+        if not linea:
+            continue
+
+        if "SEMESTRE" in linea.upper():
+            continue
+
+        match = patron.match(linea)
 
         if match:
             filas.append(match.groups())
@@ -224,8 +230,8 @@ def extraer_texto_pdf(file):
     if filas:
 
         columnas = [
-            "ORDEN","CODIGO","CURSO","REQ",
-            "H_TEO","H_PRA","CRED","TIP_CUR","AREA"
+            "CODIGO","CURSO",
+            "HT","HP","TH","CRED","REQ"
         ]
 
         df = pd.DataFrame(filas, columns=columnas)
