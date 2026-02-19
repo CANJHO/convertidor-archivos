@@ -234,52 +234,58 @@ def extraer_tablas_pdf(file):
 
 def extraer_texto_pdf(file):
 
-    texto_completo = ""
-
-    with pdfplumber.open(file) as pdf:
-        for pagina in pdf.pages:
-            texto = pagina.extract_text()
-            if texto:
-                texto_completo += texto + "\n"
-
-    lineas = texto_completo.split("\n")
+    file.seek(0)
 
     filas = []
 
-    for linea in lineas:
+    with pdfplumber.open(file) as pdf:
 
-        linea = linea.strip()
+        for pagina in pdf.pages:
 
-        if not linea:
+            palabras = pagina.extract_words()
+
+            linea_actual = []
+            y_actual = None
+
+            for palabra in palabras:
+
+                # Agrupar palabras por posición vertical (misma fila)
+                if y_actual is None:
+                    y_actual = palabra["top"]
+
+                if abs(palabra["top"] - y_actual) < 3:
+                    linea_actual.append(palabra["text"])
+                else:
+                    if len(linea_actual) >= 7:
+                        filas.append(linea_actual)
+                    linea_actual = [palabra["text"]]
+                    y_actual = palabra["top"]
+
+            if len(linea_actual) >= 7:
+                filas.append(linea_actual)
+
+    datos_finales = []
+
+    for fila in filas:
+
+        if any(x.upper() in ["ORDEN", "CÓDIGO", "CODIGO", "CURSO"] for x in fila):
             continue
 
-        # Saltar encabezados
-        if any(p in linea.upper() for p in [
-            "ORDEN", "CÓDIGO", "CODIGO", "CURSO",
-            "SEMESTRE", "TOTAL", "CREDITOS"
-        ]):
-            continue
+        # Buscar patrón típico académico
+        if len(fila) >= 7:
 
-        # Separar por múltiples espacios
-        partes = re.split(r'\s{2,}', linea)
+            # Detectar código (ej: OB-20242)
+            if "-" in fila[0]:
 
-        # Debe tener al menos 7 columnas
-        if len(partes) >= 7:
+                codigo = fila[0]
+                curso = " ".join(fila[1:-5])
+                ht = fila[-5]
+                hp = fila[-4]
+                th = fila[-3]
+                cred = fila[-2]
+                req = fila[-1]
 
-            # Algunas líneas traen ORDEN al inicio
-            if partes[0].isdigit():
-                partes = partes[1:]
-
-            if len(partes) >= 7:
-                codigo = partes[0]
-                curso = partes[1]
-                ht = partes[2]
-                hp = partes[3]
-                th = partes[4]
-                cred = partes[5]
-                req = partes[6]
-
-                filas.append([
+                datos_finales.append([
                     codigo,
                     curso,
                     ht,
@@ -289,7 +295,7 @@ def extraer_texto_pdf(file):
                     req
                 ])
 
-    if not filas:
+    if not datos_finales:
         return None
 
     columnas = [
@@ -298,7 +304,7 @@ def extraer_texto_pdf(file):
         "CRED", "REQ"
     ]
 
-    df = pd.DataFrame(filas, columns=columnas)
+    df = pd.DataFrame(datos_finales, columns=columnas)
 
     df.reset_index(drop=True, inplace=True)
 
