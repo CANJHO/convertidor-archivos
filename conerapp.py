@@ -309,8 +309,10 @@ def extraer_texto_pdf(file):
 # =====================================================
 # PROCESAR PDF
 # =====================================================
-
 def procesar_pdf(file, nombre_archivo=""):
+
+    # 🔥 MUY IMPORTANTE
+    file.seek(0)
 
     df = extraer_texto_pdf(file)
 
@@ -453,10 +455,13 @@ if st.button("Convertir TODOS"):
 
         for i, archivo_pdf in enumerate(archivos_masivos):
 
+            archivo_pdf.seek(0)  # 🔥 reset obligatorio
+
             df = procesar_pdf(
                 archivo_pdf,
                 archivo_pdf.name
             )
+
 
             if df is not None:
                 dfs.append(df)
