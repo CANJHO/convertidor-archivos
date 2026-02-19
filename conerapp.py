@@ -156,6 +156,51 @@ def extraer_tablas_pdf(file):
 
     df = pd.DataFrame(filas)
 
+    # 🔥 Validar que haya al menos 2 filas
+    if len(df) < 2:
+        return None
+
+    # Intentar usar primera fila como encabezado
+    posible_header = df.iloc[0]
+
+    # Validar que realmente parezca encabezado
+    if any(str(x).upper() in ["ORDEN","CÓDIGO","CODIGO","CURSO"] for x in posible_header):
+        df.columns = posible_header
+        df = df[1:]
+    else:
+        # si no parece encabezado, no lo usamos
+        df.columns = [f"COL_{i}" for i in range(len(df.columns))]
+
+    df = df.reset_index(drop=True)
+
+    df = limpiar_dataframe(df)
+
+    if df.empty:
+        return None
+
+    return df
+
+
+    filas = []
+
+    with pdfplumber.open(file) as pdf:
+
+        for pagina in pdf.pages:
+
+            tablas = pagina.extract_tables()
+
+            for tabla in tablas:
+
+                for fila in tabla:
+
+                    if fila and any(celda is not None for celda in fila):
+                        filas.append(fila)
+
+    if not filas:
+        return None
+
+    df = pd.DataFrame(filas)
+
     # usar primera fila como encabezado
     df.columns = df.iloc[0]
     df = df[1:]
