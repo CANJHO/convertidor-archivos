@@ -233,91 +233,127 @@ def extraer_tablas_pdf(file):
 # =====================================================
 
 def extraer_texto_pdf(file):
+    """
+    Extrae Planes AKADEMIC tipo:
+      P09-20242-
+      MATEMÁTICA I 00 3.0 2.0 5.0 4.0 Ningun Requisito
+      P09A1101
 
+    Devuelve DF con:
+      PLAN, SEMESTRE, CODIGO (completo concatenado), CURSO, HT, HP, TH, CRED, REQ
+    """
+    import re
+    import pandas as pd
+    import pdfplumber
+
+    def norm_ws(s: str) -> str:
+        return " ".join((s or "").split())
+
+    def is_prefix_line(line: str) -> bool:
+        s = (line or "").strip().replace(" ", "")
+        return re.fullmatch(r"P\d{2}-\d+-", s) is not None
+
+    def is_code_line(line: str) -> bool:
+        # Ej: P09A1101 o 11001 o P09A2155
+        s = norm_ws(line)
+        return re.fullmatch(r"[A-Z0-9]{4,15}", s) is not None
+
+    def parse_course_line_without_code(line: str):
+        """
+        MATEMÁTICA I 00 3.0 2.0 5.0 4.0 Ningun Requisito
+        """
+        s = norm_ws(line)
+        toks = s.split()
+        if len(toks) < 6:
+            return None
+        try:
+            esp_idx = toks.index("00")   # columna Esp
+        except ValueError:
+            return None
+
+        if esp_idx < 1:
+            return None
+
+        curso = " ".join(toks[:esp_idx]).strip()
+        after = toks[esp_idx + 1:]
+        if len(after) < 4:
+            return None
+
+        ht, hp, th, cred = after[0], after[1], after[2], after[3]
+        req = " ".join(after[4:]).strip() if len(after) > 4 else ""
+        return curso, ht, hp, th, cred, req
+
+    # --- leer líneas de todo el PDF
     file.seek(0)
-
-    filas = []
-
+    lines = []
     with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            txt = page.extract_text() or ""
+            lines.extend(txt.split("\n"))
 
-        for pagina in pdf.pages:
+    # --- parseo
+    rows = []
+    semestre = ""
 
-            palabras = pagina.extract_words()
-
-            linea_actual = []
-            y_actual = None
-
-            for palabra in palabras:
-
-                # Agrupar palabras por posición vertical (misma fila)
-                if y_actual is None:
-                    y_actual = palabra["top"]
-
-                if abs(palabra["top"] - y_actual) < 3:
-                    linea_actual.append(palabra["text"])
-                else:
-                    if len(linea_actual) >= 7:
-                        filas.append(linea_actual)
-                    linea_actual = [palabra["text"]]
-                    y_actual = palabra["top"]
-
-            if len(linea_actual) >= 7:
-                filas.append(linea_actual)
-
-    datos_finales = []
-
-    for fila in filas:
-
-        if any(x.upper() in ["ORDEN", "CÓDIGO", "CODIGO", "CURSO"] for x in fila):
+    i = 0
+    while i < len(lines):
+        line = (lines[i] or "").strip()
+        if not line:
+            i += 1
             continue
 
-        # Buscar patrón típico académico
-        if len(fila) >= 7:
+        # Semestre
+        if line.upper().startswith("SEMESTRE"):
+            semestre = line.split(":")[-1].strip().upper()
+            i += 1
+            continue
 
-            # Detectar código (ej: OB-20242)
-            if "-" in fila[0]:
+        # Prefijo de código (P09-20242-)
+        if is_prefix_line(line):
+            prefix = line.strip().replace(" ", "")
 
-                codigo = fila[0]
-                curso = " ".join(fila[1:-5])
-                ht = fila[-5]
-                hp = fila[-4]
-                th = fila[-3]
-                cred = fila[-2]
-                req = fila[-1]
+            # Patrón esperado: prefix, curso_line, code_line
+            if i + 2 < len(lines):
+                curso_line = (lines[i + 1] or "").strip()
+                code_line = (lines[i + 2] or "").strip()
 
-                datos_finales.append([
-                    codigo,
-                    curso,
-                    ht,
-                    hp,
-                    th,
-                    cred,
-                    req
-                ])
+                parsed = parse_course_line_without_code(curso_line)
+                if parsed and is_code_line(code_line):
+                    curso, ht, hp, th, cred, req = parsed
+                    codigo_completo = prefix + norm_ws(code_line)
 
-    if not datos_finales:
+                    # PLAN lo saco del prefix: P09-20242-
+                    plan = prefix.split("-")[1] if "-" in prefix else ""
+
+                    rows.append([
+                        plan, semestre, codigo_completo, curso,
+                        ht, hp, th, cred, req
+                    ])
+
+                    i += 3
+                    continue
+
+            i += 1
+            continue
+
+        i += 1
+
+    if not rows:
         return None
 
-    columnas = [
-        "CODIGO", "CURSO",
-        "HT", "HP", "TH",
-        "CRED", "REQ"
-    ]
-
-    df = pd.DataFrame(datos_finales, columns=columnas)
+    df = pd.DataFrame(rows, columns=[
+        "PLAN", "SEMESTRE", "CODIGO", "CURSO",
+        "HT", "HP", "TH", "CRED", "REQ"
+    ])
 
     df.reset_index(drop=True, inplace=True)
-
     return df
-
 
 
 # =====================================================
 # PROCESAR PDF
 # =====================================================
 def procesar_pdf(file, nombre_archivo=""):
-
-    # 🔥 MUY IMPORTANTE
     file.seek(0)
 
     df = extraer_texto_pdf(file)
@@ -325,10 +361,10 @@ def procesar_pdf(file, nombre_archivo=""):
     if df is None or df.empty:
         return None
 
+    # Mantener tu columna ARCHIVO
     df.insert(0, "ARCHIVO", nombre_archivo)
 
     return df
-
 
 
 # =====================================================
