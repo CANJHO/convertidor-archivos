@@ -151,19 +151,36 @@ def extraer_tablas_pdf(file):
                     if fila and any(celda is not None for celda in fila):
                         filas.append(fila)
 
-    if filas:
+    if not filas:
+        return None
 
-        df = pd.DataFrame(filas)
+    df = pd.DataFrame(filas)
 
-        df.columns = df.iloc[0]
+    # usar primera fila como encabezado
+    df.columns = df.iloc[0]
+    df = df[1:]
 
-        df = df[1:]
+    df = df.reset_index(drop=True)
 
-        df = limpiar_dataframe(df)
+    # 🔥 ELIMINAR FILAS QUE SEAN SOLO ENCABEZADO REPETIDO
+    df = df[
+        ~(
+            df.iloc[:,0].astype(str).str.upper().str.contains("ORDEN|CÓDIGO|CODIGO")
+        )
+    ]
 
-        return df
+    df = df[
+        ~(
+            df.iloc[:,1].astype(str).str.upper().str.contains("CURSO")
+        )
+    ]
 
-    return None
+    df = limpiar_dataframe(df)
+
+    if df.empty:
+        return None
+
+    return df
 
 
 # =====================================================
