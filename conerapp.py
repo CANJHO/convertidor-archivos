@@ -144,39 +144,40 @@ def extraer_tablas_pdf(file):
 def extraer_texto_pdf(file):
     """
     Extractor UNIVERSAL para Planes AKADEMIC UAI.
-
-    Soporta:
-    A) Formato OB:
-        P09-20242-
-        MATEMÁTICA I 00 3.0 2.0 5.0 4.0 Ningun Requisito
-        P09A1101
-
-    B) Formato AF / P01:
-        P01-
-        14210-
-        10A01
-        MATEMÁTICA I 3.0 2.0 5.0 4.0 O NINGUNO
+    - OB: P09-20242- + (curso con '00') + codigo (P09A1101)
+    - AF/P01: P01- + 14210-/20201- + 10A01 + (curso con HT HP TH CRD + TC + REQ)
+    Compatible con Streamlit masivo: abre siempre desde bytes.
     """
+    import re
+    import io
+    import pandas as pd
+    import pdfplumber
+
     def norm_ws(s: str) -> str:
         return " ".join((s or "").split())
 
     def is_prefix_ob(line: str) -> bool:
+        # P09-20242-
         s = (line or "").strip().replace(" ", "")
         return re.fullmatch(r"P\d{2}-\d+-", s) is not None
 
     def is_prefix_p01(line: str) -> bool:
+        # P01-
         s = (line or "").strip().replace(" ", "")
         return re.fullmatch(r"P\d{2}-", s) is not None
 
     def is_digits_prefix(line: str) -> bool:
+        # 14210- / 20201-
         s = (line or "").strip().replace(" ", "")
         return re.fullmatch(r"\d+-", s) is not None
 
     def is_code_line(line: str) -> bool:
+        # 10A01 / P09A1101 / 11001 / 25AA1...
         s = norm_ws(line)
         return re.fullmatch(r"[A-Z0-9]{3,15}", s) is not None
 
     def parse_ob_course_line(line: str):
+        # MATEMÁTICA I 00 3.0 2.0 5.0 4.0 Ningun Requisito
         s = norm_ws(line)
         toks = s.split()
         if len(toks) < 6:
@@ -187,31 +188,32 @@ def extraer_texto_pdf(file):
             return None
         if esp_idx < 1:
             return None
-
         curso = " ".join(toks[:esp_idx]).strip()
         after = toks[esp_idx + 1:]
         if len(after) < 4:
             return None
-
         ht, hp, th, cred = after[0], after[1], after[2], after[3]
         req = " ".join(after[4:]).strip() if len(after) > 4 else ""
         return curso, ht, hp, th, cred, req
 
     def parse_p01_course_line(line: str):
+        """
+        MATEMÁTICA I 3.0 2.0 5.0 4.0 O NINGUNO
+        (TC = O/E normalmente)
+        """
         s = norm_ws(line)
         toks = s.split()
         if len(toks) < 6:
             return None
 
         float_pat = re.compile(r"^\d+(\.\d+)?$")
-        idx_num = None
 
+        idx_num = None
         for i in range(0, len(toks) - 3):
             if (float_pat.match(toks[i]) and float_pat.match(toks[i+1]) and
                 float_pat.match(toks[i+2]) and float_pat.match(toks[i+3])):
                 idx_num = i
                 break
-
         if idx_num is None:
             return None
 
@@ -226,10 +228,18 @@ def extraer_texto_pdf(file):
         req = " ".join(tail).strip() if tail else ""
         return curso, ht, hp, th, cred, req
 
+    # ✅ STREAMLIT SAFE: trabajar con bytes SIEMPRE
+    try:
+        pdf_bytes = file.getvalue()
+    except Exception:
+        file.seek(0)
+        pdf_bytes = file.read()
+
+    bio = io.BytesIO(pdf_bytes)
+
     # leer líneas completas
-    file.seek(0)
     lines = []
-    with pdfplumber.open(file) as pdf:
+    with pdfplumber.open(bio) as pdf:
         for page in pdf.pages:
             txt = page.extract_text() or ""
             lines.extend(txt.split("\n"))
@@ -244,7 +254,7 @@ def extraer_texto_pdf(file):
             i += 1
             continue
 
-        # Semestre/Ciclo
+        # Semestre / Ciclo
         if line.upper().startswith("SEMESTRE"):
             semestre = line.split(":")[-1].strip().upper()
             i += 1
@@ -255,14 +265,14 @@ def extraer_texto_pdf(file):
             i += 1
             continue
 
-        # ---- FORMATO OB
+        # ---------- FORMATO OB ----------
         if is_prefix_ob(line):
             prefix = line.strip().replace(" ", "")
             if i + 2 < len(lines):
                 curso_line = (lines[i + 1] or "").strip()
                 code_line = (lines[i + 2] or "").strip()
-
                 parsed = parse_ob_course_line(curso_line)
+
                 if parsed and is_code_line(code_line):
                     curso, ht, hp, th, cred, req = parsed
                     codigo = prefix + norm_ws(code_line)
@@ -274,22 +284,40 @@ def extraer_texto_pdf(file):
             i += 1
             continue
 
-        # ---- FORMATO P01 / AF
+        # ---------- FORMATO P01 / AF ----------
         if is_prefix_p01(line):
             p01 = line.strip().replace(" ", "")
+
             if i + 3 < len(lines):
-                mid = (lines[i + 1] or "").strip()
-                code = (lines[i + 2] or "").strip()
-                curso_line = (lines[i + 3] or "").strip()
+                mid = (lines[i + 1] or "").strip()      # 14210-
+                code = (lines[i + 2] or "").strip()     # 10A01
+                # curso puede estar en 1-3 líneas
+                l1 = (lines[i + 3] or "").strip()
 
                 if is_digits_prefix(mid) and is_code_line(code):
-                    parsed = parse_p01_course_line(curso_line)
+                    # intentar 1 línea
+                    parsed = parse_p01_course_line(l1)
+                    used = 1
+
+                    # si no parsea, concatenar con la siguiente (curso partido)
+                    if (parsed is None) and (i + 4 < len(lines)):
+                        l2 = (lines[i + 4] or "").strip()
+                        parsed = parse_p01_course_line(l1 + " " + l2)
+                        used = 2
+
+                    # si aún no, concatenar 3 líneas (curso partido + números abajo)
+                    if (parsed is None) and (i + 5 < len(lines)):
+                        l2 = (lines[i + 4] or "").strip()
+                        l3 = (lines[i + 5] or "").strip()
+                        parsed = parse_p01_course_line(l1 + " " + l2 + " " + l3)
+                        used = 3
+
                     if parsed:
                         curso, ht, hp, th, cred, req = parsed
                         codigo = p01 + mid.replace(" ", "") + norm_ws(code)
                         plan = mid.replace("-", "").strip()
                         rows.append([plan, semestre, codigo, curso, ht, hp, th, cred, req])
-                        i += 4
+                        i += (3 + used)
                         continue
 
             i += 1
@@ -305,10 +333,7 @@ def extraer_texto_pdf(file):
         "HT", "HP", "TH", "CRED", "REQ"
     ])
     df.reset_index(drop=True, inplace=True)
-    return df
-
-
-# =====================================================
+    return df# =====================================================
 # PROCESAR PDF
 # =====================================================
 def procesar_pdf(file, nombre_archivo=""):
