@@ -139,17 +139,25 @@ def extraer_tablas_pdf(file):
 
 
 # =====================================================
-# EXTRAER TEXTO PDF (UNIVERSAL AKADEMIC: OB + AF/P01)
+# EXTRAER TEXTO PDF (UNIVERSAL AKADEMIC: OB + AF/P01 REAL)
 # =====================================================
 def extraer_texto_pdf(file):
     """
     Extractor UNIVERSAL para Planes AKADEMIC UAI.
-    - OB: P09-20242- + (curso con '00') + codigo (P09A1101)
-    - AF/P01: P01- + 14210-/20201- + 10A01 + (curso con HT HP TH CRD + TC + REQ)
-    Compatible con Streamlit masivo: abre siempre desde bytes.
+
+    Soporta:
+    A) OB:
+        P09-20242-
+        MATEMÁTICA I 00 3.0 2.0 5.0 4.0 Ningun Requisito
+        P09A1101
+
+    B) AF/P01 REAL (como tus AF-14210 / AF-20201):
+        P01-
+        14210- MATEMÁTICA I 3.0 2.0 5.0 4.0 O NINGUNO
+        10A01
     """
-    import re
     import io
+    import re
     import pandas as pd
     import pdfplumber
 
@@ -157,22 +165,17 @@ def extraer_texto_pdf(file):
         return " ".join((s or "").split())
 
     def is_prefix_ob(line: str) -> bool:
-        # P09-20242-
         s = (line or "").strip().replace(" ", "")
         return re.fullmatch(r"P\d{2}-\d+-", s) is not None
 
     def is_prefix_p01(line: str) -> bool:
-        # P01-
         s = (line or "").strip().replace(" ", "")
         return re.fullmatch(r"P\d{2}-", s) is not None
 
-    def is_digits_prefix(line: str) -> bool:
-        # 14210- / 20201-
-        s = (line or "").strip().replace(" ", "")
-        return re.fullmatch(r"\d+-", s) is not None
+    def is_digits_prefix_token(tok: str) -> bool:
+        return re.fullmatch(r"\d+-", tok or "") is not None
 
     def is_code_line(line: str) -> bool:
-        # 10A01 / P09A1101 / 11001 / 25AA1...
         s = norm_ws(line)
         return re.fullmatch(r"[A-Z0-9]{3,15}", s) is not None
 
@@ -188,10 +191,12 @@ def extraer_texto_pdf(file):
             return None
         if esp_idx < 1:
             return None
+
         curso = " ".join(toks[:esp_idx]).strip()
         after = toks[esp_idx + 1:]
         if len(after) < 4:
             return None
+
         ht, hp, th, cred = after[0], after[1], after[2], after[3]
         req = " ".join(after[4:]).strip() if len(after) > 4 else ""
         return curso, ht, hp, th, cred, req
@@ -199,7 +204,6 @@ def extraer_texto_pdf(file):
     def parse_p01_course_line(line: str):
         """
         MATEMÁTICA I 3.0 2.0 5.0 4.0 O NINGUNO
-        (TC = O/E normalmente)
         """
         s = norm_ws(line)
         toks = s.split()
@@ -207,13 +211,13 @@ def extraer_texto_pdf(file):
             return None
 
         float_pat = re.compile(r"^\d+(\.\d+)?$")
-
         idx_num = None
         for i in range(0, len(toks) - 3):
             if (float_pat.match(toks[i]) and float_pat.match(toks[i+1]) and
                 float_pat.match(toks[i+2]) and float_pat.match(toks[i+3])):
                 idx_num = i
                 break
+
         if idx_num is None:
             return None
 
@@ -228,7 +232,7 @@ def extraer_texto_pdf(file):
         req = " ".join(tail).strip() if tail else ""
         return curso, ht, hp, th, cred, req
 
-    # ✅ STREAMLIT SAFE: trabajar con bytes SIEMPRE
+    # ✅ Streamlit-safe: abrir desde bytes SIEMPRE (especialmente masivo)
     try:
         pdf_bytes = file.getvalue()
     except Exception:
@@ -237,7 +241,6 @@ def extraer_texto_pdf(file):
 
     bio = io.BytesIO(pdf_bytes)
 
-    # leer líneas completas
     lines = []
     with pdfplumber.open(bio) as pdf:
         for page in pdf.pages:
@@ -271,8 +274,8 @@ def extraer_texto_pdf(file):
             if i + 2 < len(lines):
                 curso_line = (lines[i + 1] or "").strip()
                 code_line = (lines[i + 2] or "").strip()
-                parsed = parse_ob_course_line(curso_line)
 
+                parsed = parse_ob_course_line(curso_line)
                 if parsed and is_code_line(code_line):
                     curso, ht, hp, th, cred, req = parsed
                     codigo = prefix + norm_ws(code_line)
@@ -284,41 +287,42 @@ def extraer_texto_pdf(file):
             i += 1
             continue
 
-        # ---------- FORMATO P01 / AF ----------
+        # ---------- FORMATO P01 / AF REAL ----------
         if is_prefix_p01(line):
-            p01 = line.strip().replace(" ", "")
+            p01 = line.strip().replace(" ", "")  # P01-
 
-            if i + 3 < len(lines):
-                mid = (lines[i + 1] or "").strip()      # 14210-
-                code = (lines[i + 2] or "").strip()     # 10A01
-                # curso puede estar en 1-3 líneas
-                l1 = (lines[i + 3] or "").strip()
+            # Esperado real:
+            # i+1: "14210- MATEMÁTICA I 3.0 2.0 5.0 4.0 O NINGUNO"  (plan+curso juntos)
+            # i+2: "10A01"                                          (codigo)
+            if i + 2 < len(lines):
+                l_mid = (lines[i + 1] or "").strip()
+                toks_mid = norm_ws(l_mid).split()
 
-                if is_digits_prefix(mid) and is_code_line(code):
-                    # intentar 1 línea
-                    parsed = parse_p01_course_line(l1)
-                    used = 1
+                if toks_mid and is_digits_prefix_token(toks_mid[0]):
+                    mid_token = toks_mid[0]  # 14210-
+                    curso_line = " ".join(toks_mid[1:]).strip()  # resto
 
-                    # si no parsea, concatenar con la siguiente (curso partido)
-                    if (parsed is None) and (i + 4 < len(lines)):
-                        l2 = (lines[i + 4] or "").strip()
-                        parsed = parse_p01_course_line(l1 + " " + l2)
-                        used = 2
+                    # Buscar código más abajo si el curso se partió en líneas
+                    k = i + 2
+                    extra = []
+                    while k < len(lines) and not is_code_line((lines[k] or "").strip()):
+                        extra.append((lines[k] or "").strip())
+                        k += 1
 
-                    # si aún no, concatenar 3 líneas (curso partido + números abajo)
-                    if (parsed is None) and (i + 5 < len(lines)):
-                        l2 = (lines[i + 4] or "").strip()
-                        l3 = (lines[i + 5] or "").strip()
-                        parsed = parse_p01_course_line(l1 + " " + l2 + " " + l3)
-                        used = 3
+                    if extra:
+                        curso_line = (curso_line + " " + " ".join(extra)).strip()
 
-                    if parsed:
-                        curso, ht, hp, th, cred, req = parsed
-                        codigo = p01 + mid.replace(" ", "") + norm_ws(code)
-                        plan = mid.replace("-", "").strip()
-                        rows.append([plan, semestre, codigo, curso, ht, hp, th, cred, req])
-                        i += (3 + used)
-                        continue
+                    if k < len(lines):
+                        code_line = (lines[k] or "").strip()
+
+                        parsed = parse_p01_course_line(curso_line)
+                        if parsed:
+                            curso, ht, hp, th, cred, req = parsed
+                            codigo = p01 + mid_token + norm_ws(code_line)  # P01-14210-10A01
+                            plan = mid_token.replace("-", "").strip()
+                            rows.append([plan, semestre, codigo, curso, ht, hp, th, cred, req])
+                            i = k + 1
+                            continue
 
             i += 1
             continue
@@ -333,11 +337,18 @@ def extraer_texto_pdf(file):
         "HT", "HP", "TH", "CRED", "REQ"
     ])
     df.reset_index(drop=True, inplace=True)
-    return df# =====================================================
+    return df
+
+
+# =====================================================
 # PROCESAR PDF
 # =====================================================
 def procesar_pdf(file, nombre_archivo=""):
-    file.seek(0)
+    # No dependas de seek() para pdfplumber; pero lo dejamos por compatibilidad
+    try:
+        file.seek(0)
+    except Exception:
+        pass
 
     df = extraer_texto_pdf(file)
 
@@ -443,7 +454,10 @@ if st.button("Convertir TODOS"):
         dfs = []
 
         for i, archivo_pdf in enumerate(archivos_masivos):
-            archivo_pdf.seek(0)
+            try:
+                archivo_pdf.seek(0)
+            except Exception:
+                pass
 
             df = procesar_pdf(archivo_pdf, archivo_pdf.name)
 
